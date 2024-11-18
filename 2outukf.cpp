@@ -2,6 +2,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
+#include <fstream>
 
 using namespace Eigen;
 using namespace std;
@@ -84,6 +85,9 @@ void updateStateWithMeasurement(VectorXd& state_pred, MatrixXd& P_pred, const Ve
 
 // MAIN FUNCN
 int main() {
+    ofstream file("2outukf.csv");
+    file << "Step,Actual x,Actual y,Estimated x,Estimated y" << endl;
+    
     state_ << 10, 0, 0.5, 0.5, 0, 0;
     MatrixXd sigma_points = MatrixXd(STATE_DIM, 2 * STATE_DIM + 1);
 
@@ -109,7 +113,8 @@ int main() {
         // Perform measurement update
         updateStateWithMeasurement(state_pred, P_pred, z);
 
-        // PRINT MORE VAL
+        file << step << "," << actual_x << "," << actual_y << "," << state_pred(0) << "," << state_pred(1) << endl;
+	// PRINT MORE VAL
         cout << "Step " << step << ":" << endl;
         cout << "Actual position: x = " << actual_x << ", y = " << actual_y << endl;
         cout << "UKF estimated position: x = " << state_pred(0) << ", y = " << state_pred(1) << endl;
@@ -118,7 +123,7 @@ int main() {
         state_ = state_pred;
         P_ = P_pred;
     }
-
+    file.close();
     return 0;
 }
 
