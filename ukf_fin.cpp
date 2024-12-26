@@ -1,9 +1,10 @@
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <Eigen/Dense>
 #include <cmath>
 #include <vector>
-#include <random>
-#include <iomanip>
+#include <thread> // For multithreading (to simulate GPS/IMU update timing)
 
 using namespace Eigen;
 using namespace std;
@@ -11,31 +12,47 @@ using namespace std;
 const int STATE_DIM = 5; // [x, y, vel, yaw, yaw_rate]
 const int MEASUREMENT_DIM = 3; // [x, y, yaw]
 double dt = 0.1; // time step in seconds
-double prev_v = 0.0;
-double prev_yaw = 0.0;
 double alpha = 0.001;
 double beta = 2;
 double kappa = 0;
 double lambda = alpha * alpha * (STATE_DIM + kappa) - STATE_DIM;
-
-// Normalizing angles to [-pi, pi]
-double normalizeAngle(double angle) {
-    while (angle > M_PI) angle -= 2 * M_PI;
-    while (angle < -M_PI) angle += 2 * M_PI;
-    return angle;
-}
 
 // Initial state and covariance
 VectorXd state_ = VectorXd::Zero(STATE_DIM);
 MatrixXd P_ = MatrixXd::Identity(STATE_DIM, STATE_DIM);
 
 // Process and measurement noise
-MatrixXd Q = MatrixXd::Identity(STATE_DIM, STATE_DIM) * 0.01; // Process noise covariance
-MatrixXd R = MatrixXd::Identity(MEASUREMENT_DIM, MEASUREMENT_DIM) * 0.1; // Measurement noise covariance
+MatrixXd Q = MatrixXd::Identity(STATE_DIM, STATE_DIM) * 0.01; // process noise covariance
+MatrixXd R = MatrixXd::Identity(MEASUREMENT_DIM, MEASUREMENT_DIM) * 0.1; // measurement noise covariance
 
-// Gaussian noise generator
-std::default_random_engine generator;
-std::normal_distribution<double> noise_distribution(0.0, 0.01); // Mean 0, Std Dev 0.01
+// Function to normalize angles
+double normalizeAngle(double angle) {
+    while (angle > M_PI) angle -= 2 * M_PI;
+    while (angle < -M_PI) angle += 2 * M_PI;
+    return angle;
+}
+
+// Function to read CSV data
+void readCSVData(ifstream &file, double &gps_x, double &gps_y, double &gps_yaw, double &imu_ax, double &imu_yaw_rate) {
+    string line;
+    if (getline(file, line)) { // Read one line at a time
+        stringstream ss(line);
+        string value;
+
+        // Read the GPS values (gps_x, gps_y, gps_yaw)
+        getline(ss, value, ','); gps_x = stod(value);
+        getline(ss, value, ','); gps_y = stod(value);
+        getline(ss, value, ','); gps_yaw = stod(value);
+
+        // Read the IMU values (imu_ax, imu_yaw_rate)
+        getline(ss, value, ','); imu_ax = stod(value);
+        getline(ss, value, ','); imu_yaw_rate = stod(value);
+
+        // Print the raw CSV data
+        cout << "CSV Data: GPS(x: " << gps_x << ", y: " << gps_y << ", yaw: " << gps_yaw
+             << "), IMU(ax: " << imu_ax << ", yaw_rate: " << imu_yaw_rate << ")" << endl;
+    }
+}
 
 void generateSigmaPoints(const VectorXd& state, const MatrixXd& P, MatrixXd& sigma_points) {
     int n_sig = 2 * STATE_DIM + 1;
@@ -54,11 +71,11 @@ void predictSigmaPoints(MatrixXd& sigma_points, double dt, double imu_ax, double
     for (int i = 0; i < sigma_points.cols(); ++i) {
         double px = sigma_points(0, i);
         double py = sigma_points(1, i);
-        double v = sigma_points(2, i); // velocity
+        double v = sigma_points(2, i);
         double yaw = sigma_points(3, i);
         double yaw_rate = sigma_points(4, i);
 
-        // Predict position and yaw
+        v += imu_ax * dt;
         if (fabs(yaw_rate) > 1e-5) {
             sigma_points(0, i) += v / yaw_rate * (sin(yaw + yaw_rate * dt) - sin(yaw));
             sigma_points(1, i) += v / yaw_rate * (-cos(yaw + yaw_rate * dt) + cos(yaw));
@@ -66,9 +83,7 @@ void predictSigmaPoints(MatrixXd& sigma_points, double dt, double imu_ax, double
             sigma_points(0, i) += v * cos(yaw) * dt;
             sigma_points(1, i) += v * sin(yaw) * dt;
         }
-
-        // Update velocity and yaw
-        sigma_points(2, i) = v + imu_ax * dt;
+        sigma_points(2, i) = v;
         sigma_points(3, i) = normalizeAngle(yaw + imu_yaw_rate * dt);
     }
 }
@@ -88,16 +103,14 @@ VectorXd predictMeanAndCovariance(MatrixXd& sigma_points, MatrixXd& P_pred) {
     P_pred = MatrixXd::Zero(STATE_DIM, STATE_DIM);
     for (int i = 0; i < sigma_points.cols(); ++i) {
         VectorXd diff = sigma_points.col(i) - x_pred;
-        diff(3) = normalizeAngle(diff(3)); // Normalize yaw
         P_pred += weights(i) * diff * diff.transpose();
     }
-    P_pred += Q; // Add process noise
+    P_pred += Q;
 
     return x_pred;
 }
 
 void updateStateWithMeasurement(VectorXd& state_pred, MatrixXd& P_pred, const VectorXd& z) {
-    // Measurement matrix
     MatrixXd H = MatrixXd::Zero(MEASUREMENT_DIM, STATE_DIM);
     H(0, 0) = 1; // x
     H(1, 1) = 1; // y
@@ -106,69 +119,51 @@ void updateStateWithMeasurement(VectorXd& state_pred, MatrixXd& P_pred, const Ve
     VectorXd y = z - H * state_pred; // Innovation
     y(2) = normalizeAngle(y(2)); // Normalize yaw in innovation
 
-    MatrixXd S = H * P_pred * H.transpose() + R; // Innovation covariance
-    MatrixXd K = P_pred * H.transpose() * S.inverse(); // Kalman gain
+    MatrixXd S = H * P_pred * H.transpose() + R;
+    MatrixXd K = P_pred * H.transpose() * S.inverse();
 
-    state_pred += K * y; // Update state estimate
-    P_pred -= K * H * P_pred; // Update covariance
+    state_pred += K * y;
+    P_pred -= K * H * P_pred;
+
+    state_ = state_pred;
 }
 
 int main() {
     state_ << 10, 0, 0.5, 0, 0; // Initial state: x, y, velocity, yaw, yaw_rate
     MatrixXd sigma_points = MatrixXd(STATE_DIM, 2 * STATE_DIM + 1);
+    P_ = MatrixXd::Identity(STATE_DIM, STATE_DIM);
 
-    cout << fixed << setprecision(4);
     cout << "Initial actual position: x = 10, y = 0" << endl;
     cout << "Initial UKF state: x = " << state_(0) << ", y = " << state_(1) << endl;
 
-    for (int step = 1; step <= 10; ++step) {
-        // Simulate actual points
-        double actual_x = 10 + cos(0.1 * step) * step;
-        double actual_y = sin(0.1 * step) * step;
-        double actual_yaw = 0.1 * step;
+    ifstream csvFile("simulation_data.csv");
+    std::string line;
+    getline(csvFile, line); // Skip header
 
-        // Simulate measurement noise
-        VectorXd gps = VectorXd::Zero(3); // GPS simulated measurement
-        gps(0) = actual_x + 0.1 * noise_distribution(generator);    // GPS X with noise
-        gps(1) = actual_y + 0.1 * noise_distribution(generator);    // GPS Y with noise
-        gps(2) = actual_yaw + 0.01 * noise_distribution(generator); // GPS Yaw with noise
+    int step = 1;
+    while (!csvFile.eof()) {
+        double gps_x, gps_y, gps_yaw, imu_ax, imu_yaw_rate;
 
-        // Calculate IMU-derived values
-        double ax = (state_(2) - prev_v) / dt; // Calculate linear acceleration
-        double yaw_rate = (state_(3) - prev_yaw) / dt; // Calculate angular velocity
-        double imu_ax = ax + noise_distribution(generator); // Add IMU noise
-        double imu_yaw_rate = yaw_rate + noise_distribution(generator);
+        readCSVData(csvFile, gps_x, gps_y, gps_yaw, imu_ax, imu_yaw_rate);
 
-        // Dynamic process noise update
-        Q(2, 2) = std::max(0.01, fabs(imu_ax) * 0.1);
-        Q(3, 3) = std::max(0.01, fabs(imu_yaw_rate) * 0.1);
-        Q(4, 4) = std::max(0.01, fabs(imu_yaw_rate) * 0.1);
-
-        // Generate and predict sigma points
         generateSigmaPoints(state_, P_, sigma_points);
-        predictSigmaPoints(sigma_points, dt, imu_ax, imu_yaw_rate);
+        predictSigmaPoints(sigma_points, 0.1, imu_ax, imu_yaw_rate);
 
-        // Predict mean and covariance
         MatrixXd P_pred;
         VectorXd state_pred = predictMeanAndCovariance(sigma_points, P_pred);
 
-        // Update with measurement
+        VectorXd gps = VectorXd(MEASUREMENT_DIM);
+        gps << gps_x, gps_y, gps_yaw;
+
         updateStateWithMeasurement(state_pred, P_pred, gps);
 
-        // Print results
-        cout << "Step " << step << ":" << endl;
-        cout << "Actual position: x = " << actual_x << ", y = " << actual_y << ", yaw = " << actual_yaw << endl;
-        cout << "UKF estimated position: x = " << state_pred(0)
-             << ", y = " << state_pred(1)
-             << ", yaw = " << state_pred(3) << endl;
+        cout << "Step " << step++ << ": Predicted state: x = " << state_(0)
+             << ", y = " << state_(1) << ", yaw = " << state_(3) << endl;
 
-        // Update for next iteration
-        state_ = state_pred;
-        P_ = P_pred;
-        prev_v = state_(2); // Update velocity
-        prev_yaw = state_(3); // Update yaw
+        this_thread::sleep_for(chrono::milliseconds(100));
     }
 
+    csvFile.close();
     return 0;
 }
 

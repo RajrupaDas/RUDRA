@@ -6,9 +6,9 @@
 using namespace Eigen;
 using namespace std;
 
-const int STATE_DIM = 6; //[x, y, vel, yaw, yaw_rate, accn]
+const int STATE_DIM = 8; //[x, y, vel, yaw, yaw_rate, accn] + accn and yaw rate biases
 const int MEASUREMENT_DIM = 3; //[x, y, yaw]
-double dt = 0.05; // time step in seconds
+double dt = 0.01; // time step in seconds
 double prev_v = 0.0;
 double prev_yaw = 0.0;
 double alpha = 0.01;
@@ -65,6 +65,9 @@ void predictSigmaPoints(MatrixXd& sigma_points, double dt, double actual_acceler
         sigma_points(2,i) = v_new; 
         sigma_points(3, i) = normalizeAngle(yaw + yaw_rate * dt);
 	sigma_points(5, i) = actual_acceleration;
+
+	sigma_points(6, i) += 0;//acc bias const
+	sigma_points(7, i) += 0;// yaw rate beas const
     }
 }
 
@@ -112,6 +115,7 @@ void updateStateWithMeasurement(VectorXd& state_pred, MatrixXd& P_pred, const Ve
 }
 
 int main() {
+    srand(time(0));//random num gen
     state_ = VectorXd(6);
     state_ << 10, 0, 0.5,0, 0, 0; // Initial state: x, y, velocity, yaw, yaw_rate
     MatrixXd sigma_points = MatrixXd(STATE_DIM, 2 * STATE_DIM + 1);
@@ -120,9 +124,10 @@ int main() {
     Q_(2, 2) = 0.01; //velocity noise
     Q_(4, 4) = 0.01;// yaw rate
     Q_(5, 5) = 0.01;// acceleration noise
+    Q_(6, 6) = 0.0001;//acc bias
+    Q_(7, 7) = 0.0001;//yaw bias
+    
     cout << "Initial state: " << state_.transpose() << endl;
-    cout << "Initial actual position: x = 10, y = 0" << endl;
-    cout << "Initial UKF state: x = " << state_(0) << ", y = " << state_(1) << endl;
 
     for (int step = 1; step <= 10; ++step) {
         // Simulate actual points
@@ -164,6 +169,38 @@ int main() {
         cout << "UKF estimated position: x = " << state_pred(0)
              << ", y = " << state_pred(1)
              << ", yaw = " << state_pred(3) << endl;
+
+    /*for (int step = 1; step <= 50; ++step) {
+        // Generate control inputs with slight randomness
+        double random_yaw_rate = ((rand() % 200) - 100) / 10000.0; // Small random variation in yaw rate
+        double random_acceleration = ((rand() % 200) - 100) / 1000.0; // Small random variation in acceleration
+
+        // Simulate actual dynamics with irregular bends and curves
+        double actual_x = state_(0) + cos(state_(3)) * state_(2) * dt;
+        double actual_y = state_(1) + sin(state_(3)) * state_(2) * dt;
+        double actual_yaw = state_(3) + (state_(4) + random_yaw_rate) * dt;
+        double actual_acceleration = state_(5) + random_acceleration;
+
+        generateSigmaPoints(state_, P_, sigma_points);
+        predictSigmaPoints(sigma_points, dt, actual_acceleration);
+
+        MatrixXd P_pred;
+        VectorXd state_pred = predictMeanAndCovariance(sigma_points, P_pred);
+
+        // Simulate a noisy measurement
+        VectorXd gps = VectorXd::Zero(3);
+        gps(0) = actual_x + ((rand() % 200) - 100) / 1000.0; // X with noise
+        gps(1) = actual_y + ((rand() % 200) - 100) / 1000.0; // Y with noise
+        gps(2) = actual_yaw + ((rand() % 200) - 100) / 10000.0; // Yaw with noise
+
+        // Update state with the measurement
+        updateStateWithMeasurement(state_pred, P_pred, gps);
+
+        cout << "Step " << step << ":" << endl;
+        cout << "Actual position: x = " << actual_x << ", y = " << actual_y << ", yaw = " << actual_yaw << endl;
+        cout << "UKF estimated position: x = " << state_pred(0)
+             << ", y = " << state_pred(1)
+             << ", yaw = " << state_pred(3) << endl;*/
 
         // Update state and covariance for next iteration
         state_ = state_pred;
