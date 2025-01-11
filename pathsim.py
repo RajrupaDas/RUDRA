@@ -26,7 +26,7 @@ csv_file = "simulation_data.csv"
 # Open CSV file and write the header
 with open(csv_file, mode="w", newline="") as file:
     writer = csv.writer(file)
-    writer.writerow(["gps_x", "gps_y", "imu_linear_acc", "imu_angular_vel", "linear_vel", "angular_accel"])  # CSV Header
+    writer.writerow(["gps_x", "gps_y", "imu_linear_acc", "imu_angular_vel", "linear_vel", "angular_accel", "additional_accel", "yaw_rate"])  # CSV Header
 
 # Simulation loop
 while angle < total_angle:
@@ -38,10 +38,14 @@ while angle < total_angle:
     
     # Calculate angular velocity (v = r * ω --> ω = v / r)
     angular_velocity = velocity / radius
+
+    additional_accel = imu_linear_acc + np.random.uniform(-0.2, 0.2)
     
     # Calculate angular acceleration (Δω / Δt)
     imu_angular_accel = (angular_velocity - prev_angular_velocity) / dt  # Angular acceleration
     
+    yaw_rate = imu_angular_accel + np.random.uniform(-0.2, 0.2)
+
     # Update previous values for the next iteration
     prev_velocity = velocity
     prev_angular_velocity = angular_velocity
@@ -67,7 +71,7 @@ while angle < total_angle:
     # Write to CSV
     with open(csv_file, mode="a", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow([gps_x, gps_y, imu_linear_acc, angular_velocity, velocity, imu_angular_accel])
+        writer.writerow([gps_x, gps_y, imu_linear_acc, angular_velocity, velocity, imu_angular_accel, additional_accel, yaw_rate])
     
     # Visualization
     plt.clf()

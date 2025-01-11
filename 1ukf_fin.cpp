@@ -25,6 +25,8 @@ MatrixXd P_ = MatrixXd::Identity(STATE_DIM, STATE_DIM);
 MatrixXd Q = MatrixXd::Identity(STATE_DIM, STATE_DIM) * 0.01; // process noise covariance
 MatrixXd R = MatrixXd::Identity(MEASUREMENT_DIM, MEASUREMENT_DIM) * 0.1; // measurement noise covariance
 
+MatrixXd P_pred;
+
 // Function to normalize angles
 double normalizeAngle(double angle) {
     while (angle > M_PI) angle -= 2 * M_PI;
@@ -174,5 +176,4 @@ int main() {
 
     csvFile.close();
     return 0;
-}
-
+} 
