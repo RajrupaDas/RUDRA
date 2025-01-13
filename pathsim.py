@@ -19,7 +19,6 @@ angle = 0  # Start angle in radians
 x, y = [], []
 prev_velocity = base_velocity  # Initial velocity
 prev_angular_velocity = base_velocity / radius  # Initial angular velocity
-
 # File for CSV logging
 csv_file = "simulation_data.csv"
 
