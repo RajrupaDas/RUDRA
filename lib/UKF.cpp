@@ -148,6 +148,9 @@ Vector3d locate() {
 
     updateStateWithMeasurement(state_pred, P_pred, gps);
 
+    state_ = state_pred;
+    P_ = P_pred;
+
     return state_.head(3);
 }
 
