@@ -1,4 +1,4 @@
-#include "ukf_localization.h"
+#include "UKF.h"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -125,7 +125,8 @@ Vector3d locate() {
     static bool initialized = false;
 
     if (!initialized) {
-        getline(csvFile, std::string());
+        string temp;
+        getline(csvFile, temp);
         state_ << 10, 0, 0.5, 0, 0;
         initialized = true;
     }
