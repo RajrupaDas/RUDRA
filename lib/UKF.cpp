@@ -8,7 +8,7 @@
 using namespace std;
 
 // Global Constants
-double dt = 0.1;
+double dt = 1;
 double alpha = 0.001;
 double beta = 2;
 double kappa = 0;
