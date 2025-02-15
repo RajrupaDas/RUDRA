@@ -8,10 +8,9 @@ Sensors used here are:
 3. Control Inputs (acceleration and rate of change of yaw)
 
 Configuration:
-
-src/1main.cpp
-lib/UKF.cpp
-include/UKF.h
+1. src/1main.cpp
+2. lib/UKF.cpp
+3. include/UKF.h
 
 Compile with:
 g++ -Iinclude -I/usr/include/eigen3 src/1main.cpp lib/UKF.cpp -o output_executable
