@@ -1,95 +1,73 @@
 #include <iostream>
+#include <thread>
+#include <fstream>
 #include <cmath>
-#include <unistd.h>
+#include <random>
+#include <chrono>
+
 using namespace std;
 
-double kp_turn = 1.0, ki_turn = 0.0, kd_turn = 0.0;
-double kp_trans = 1.0, ki_trans = 0.0, kd_trans = 0.0;
-double angularVelocity = 0.1;
-double linearVelocity = 0.1;
-
-class PIDController {
-private:
-    double kp, ki, kd;
-    double integral, prev_error;
-
+class PID {
 public:
-    PIDController(double p, double i, double d) 
-        : kp(p), ki(i), kd(d), integral(0.0), prev_error(0.0) {}
-
-    double compute(double setpoint, double current) {
-        double error = setpoint - current;
-        integral += error;
-        double derivative = error - prev_error;
+    double Kp, Ki, Kd;
+    double prev_error, integral;
+    PID(double p, double i, double d) : Kp(p), Ki(i), Kd(d), prev_error(0), integral(0) {}
+    double compute(double setpoint, double measured, double dt) {
+        double error = setpoint - measured;
+        integral += error * dt;
+        double derivative = (error - prev_error) / dt;
         prev_error = error;
-
-        return (kp * error) + (ki * integral) + (kd * derivative);
-    }
-
-    void reset() {
-        integral = 0.0;
-        prev_error = 0.0;
+        return Kp * error + Ki * integral + Kd * derivative;
     }
 };
 
-class MotionController {
-private:
-    PIDController turnController;
-    PIDController translationController;
-
-public:
-    MotionController() 
-        : turnController(kp_turn, ki_turn, kd_turn), 
-          translationController(kp_trans, ki_trans, kd_trans) {}
-
-    void moveToTarget(double current_x, double current_y, double current_yaw, double target_x, double target_y) {
-        double delta_x = target_x - current_x;
-        double delta_y = target_y - current_y;
-        double required_yaw = atan2(delta_y, delta_x) * 180 / M_PI;
-
-        // Turning phase
-        while (abs(required_yaw - current_yaw) > 0.5) {
-            double turn_output = turnController.compute(required_yaw, current_yaw);
-            cout << "Turning... Current Yaw: " << current_yaw 
-                 << " Angular Velocity: " << angularVelocity * (turn_output / abs(turn_output)) << endl;
-            current_yaw += angularVelocity * (turn_output / abs(turn_output));
-            sleep(0.01);
-        }
-
-        cout << "Turning complete. Now translating..." << endl;
-
-        // Translation phase
-        while (sqrt(delta_x * delta_x + delta_y * delta_y) > 0.5) {
-            double trans_output = translationController.compute(sqrt(delta_x * delta_x + delta_y * delta_y), 0);
-            cout << "Moving... Current Position: (" << current_x << ", " << current_y 
-                 << ") Linear Velocity: " << linearVelocity * (trans_output / abs(trans_output)) << endl;
-
-            current_x += linearVelocity * (delta_x / sqrt(delta_x * delta_x + delta_y * delta_y));
-            current_y += linearVelocity * (delta_y / sqrt(delta_x * delta_x + delta_y * delta_y));
-            delta_x = target_x - current_x;
-            delta_y = target_y - current_y;
-            sleep(0.01);
-        }
-        cout << "Destination reached!" << endl;
-    }
+struct Pose {
+    double x, y, yaw;
 };
+
+random_device rd;
+mt19937 gen(rd());
+uniform_real_distribution<double> noise(-0.05, 0.05);
+
+void logData(ofstream &file, double actual_yaw, double sensor_yaw, double actual_x, double actual_y, double sensor_x, double sensor_y) {
+    file << actual_yaw << "," << sensor_yaw << "," << actual_x << "," << actual_y << "," << sensor_x << "," << sensor_y << "\n";
+}
 
 int main() {
-    double start_x, start_y, start_yaw, end_x, end_y;
+    // PID gains
+    PID yawPID(0.5, 0.01, 0.1);
+    PID posPID(0.5, 0.01, 0.1);
 
-    cout << "Enter start X: ";
-    cin >> start_x;
-    cout << "Enter start Y: ";
-    cin >> start_y;
-    cout << "Enter start Yaw: ";
-    cin >> start_yaw;
-    cout << "Enter target X: ";
-    cin >> end_x;
-    cout << "Enter target Y: ";
-    cin >> end_y;
-
-    MotionController controller;
-    controller.moveToTarget(start_x, start_y, start_yaw, end_x, end_y);
-
+    // Initial conditions
+    Pose current = {0, 0, 0};
+    Pose destination = {5, 5};
+    double linear_vel = 0.1;
+    double angular_vel = 0.1;
+    double dt = 0.1;
+    
+    ofstream file("motion_data.csv");
+    file << "ActualYaw,SensorYaw,ActualX,ActualY,SensorX,SensorY\n";
+    
+    double target_yaw = atan2(destination.y - current.y, destination.x - current.x);
+    
+    // Turning phase
+    while (abs(current.yaw - target_yaw) > 0.01) {
+        double yaw_control = yawPID.compute(target_yaw, current.yaw, dt);
+        current.yaw += yaw_control * angular_vel * dt;
+        logData(file, current.yaw, current.yaw + noise(gen), current.x, current.y, current.x + noise(gen), current.y + noise(gen));
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
+    
+    // Moving phase
+    while (sqrt(pow(destination.x - current.x, 2) + pow(destination.y - current.y, 2)) > 0.1) {
+        double pos_control = posPID.compute(sqrt(pow(destination.x - current.x, 2) + pow(destination.y - current.y, 2)), 0, dt);
+        current.x += pos_control * linear_vel * cos(current.yaw) * dt;
+        current.y += pos_control * linear_vel * sin(current.yaw) * dt;
+        logData(file, current.yaw, current.yaw + noise(gen), current.x, current.y, current.x + noise(gen), current.y + noise(gen));
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
+    
+    file.close();
+    cout << "Simulation complete. Data stored in motion_data.csv" << endl;
     return 0;
 }
